@@ -32,9 +32,18 @@ http://localhost:11434/api/chat
 ./llm-council
 ```
 
-Enter your prompt when asked and press Enter to submit.
+At startup, choose an action:
+
+```text
+[Enter] run council   c configure council   q quit
+```
+
+Press Enter to run the council. Enter your prompt when asked and press Enter to submit.
 
 By default, the app prints only the final answer. After the answer, you can choose whether to show voting details and candidate answers.
+When a run finishes, the app returns to the action menu so you can enter another prompt, configure the council, or choose `q` to quit.
+
+Choose `c` to edit the existing five council members. The editor lets you change each member's name, model, instruction, and temperature, then saves the changes to `config.yaml`. It does not add or remove council members yet.
 
 ## Development Setup
 

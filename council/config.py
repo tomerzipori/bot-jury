@@ -17,3 +17,17 @@ def load_config(path: str | Path = DEFAULT_CONFIG_PATH) -> Settings:
         raise ValueError(f"{config_path} is empty")
 
     return Settings.model_validate(data)
+
+
+def save_config(
+    settings: Settings,
+    path: str | Path = DEFAULT_CONFIG_PATH,
+) -> None:
+    config_path = Path(path)
+    with config_path.open("w", encoding="utf-8") as file:
+        yaml.safe_dump(
+            settings.model_dump(mode="json"),
+            file,
+            sort_keys=False,
+            allow_unicode=True,
+        )

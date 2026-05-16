@@ -2,33 +2,55 @@ import asyncio
 from collections.abc import Iterable
 
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
+from rich.theme import Theme
 
-from council.config import load_config
-from council.models import CandidateAnswer, CouncilRun, Settings, Vote
+from council.config import DEFAULT_CONFIG_PATH, load_config, save_config
+from council.models import CandidateAnswer, CouncilMember, CouncilRun, Settings, Vote
 from council.ollama_client import OllamaClient
 from council.orchestrator import run_fast_council
 from council.voting import top_tied_labels
 
 
-console = Console()
+APP_THEME = Theme(
+    {
+        "brand": "grey70 bold",
+        "accent": "yellow3",
+        "muted": "grey50",
+        "success": "green3",
+        "warning": "yellow3",
+        "danger": "red3",
+        "border": "grey50",
+    }
+)
+console = Console(theme=APP_THEME)
 PREFLIGHT_TIMEOUT_SECONDS = 5
+COUNCIL_STATUS_INTERVAL_SECONDS = 4
+COUNCIL_STATUS_MESSAGES = [
+    "Waking up the council...",
+    "Passing notes between tiny geniuses...",
+    "Collecting suspiciously confident answers...",
+    "Making everyone vote before they change their mind...",
+    "Counting hands in the council chamber...",
+    "Polishing the least-wrong answer...",
+]
 
 
 def main() -> None:
     try:
         _main()
     except KeyboardInterrupt:
-        console.print("\n[yellow]Cancelled.[/yellow]")
+        console.print("\n[warning]Cancelled.[/warning]")
         raise SystemExit(130) from None
     except Exception as exc:
         console.print(
             Panel(
                 str(exc),
                 title="Unexpected Error",
-                border_style="red",
+                border_style="danger",
             )
         )
         raise SystemExit(1) from exc
@@ -42,25 +64,36 @@ def _main() -> None:
             Panel(
                 f"Could not load config.yaml:\n{exc}",
                 title="Configuration Error",
-                border_style="red",
+                border_style="danger",
             )
         )
         raise SystemExit(1) from exc
 
-    _render_header(settings)
+    while True:
+        _render_header(settings)
+        action = _read_start_action()
+        if action == "q":
+            console.print("[muted]Goodbye.[/muted]")
+            return
+        if action == "c":
+            settings = _configure_settings(settings)
+            continue
+        _run_council(settings)
+
+
+def _run_council(settings: Settings) -> None:
     prompt = _read_prompt()
     if not prompt:
-        console.print("[yellow]No prompt entered. Exiting.[/yellow]")
+        console.print("[warning]No prompt entered. Exiting.[/warning]")
         raise SystemExit(1)
 
-    with console.status("[bold]Checking Ollama...[/bold]", spinner="dots"):
+    with console.status("[accent]Checking Ollama...[/accent]", spinner="dots"):
         preflight_errors = asyncio.run(_preflight_ollama(settings))
     if preflight_errors:
         _render_errors(preflight_errors)
         raise SystemExit(1)
 
-    with console.status("[bold]Running Fast Council...[/bold]", spinner="dots"):
-        run = asyncio.run(run_fast_council(prompt, config=settings))
+    run = asyncio.run(_run_council_with_status(prompt, settings))
 
     _render_run(run)
 
@@ -68,21 +101,26 @@ def _main() -> None:
 def _render_header(settings: Settings) -> None:
     console.print(
         Panel.fit(
-            "[bold]LLM Council[/bold]\nFast Council via local Ollama",
-            border_style="cyan",
+            "[brand]LLM Council[/brand]\n[muted]Fast Council via local Ollama[/muted]",
+            border_style="border",
         )
     )
-    console.print(f"[bold]Ollama:[/bold] {settings.ollama.base_url}")
-    console.print(f"[bold]Run log:[/bold] {settings.app.runs_path}")
+    console.print(f"[accent]Ollama:[/accent] {settings.ollama.base_url}")
+    console.print(f"[accent]Run log:[/accent] {settings.app.runs_path}")
     console.print(_members_table(settings))
 
 
 def _members_table(settings: Settings) -> Table:
-    table = Table(title="Council Members", show_lines=True)
-    table.add_column("Name", style="bold cyan")
-    table.add_column("Model", style="green")
-    table.add_column("Temp", justify="right")
-    table.add_column("Role")
+    table = Table(
+        title="Council Members",
+        show_lines=True,
+        header_style="accent",
+        border_style="border",
+    )
+    table.add_column("Name", style="accent")
+    table.add_column("Model", style="muted")
+    table.add_column("Temp", justify="right", style="muted")
+    table.add_column("Role", style="grey70")
 
     for member in settings.council:
         table.add_row(
@@ -95,13 +133,115 @@ def _members_table(settings: Settings) -> Table:
     return table
 
 
+def _read_start_action() -> str:
+    console.print()
+    console.print(
+        "[muted][Enter] run council   "
+        "[accent]c[/accent] configure council   "
+        "[accent]q[/accent] quit[/muted]"
+    )
+
+    while True:
+        try:
+            action = console.input("[accent]Action> [/accent]").strip().lower()
+        except EOFError:
+            return "q"
+
+        if action in {"", "c", "q"}:
+            return action
+        console.print("[warning]Choose Enter, c, or q.[/warning]")
+
+
 def _read_prompt() -> str:
     console.print()
-    console.print("[bold]Enter your prompt.[/bold]")
+    console.print("[brand]Enter your prompt.[/brand]")
     try:
-        return console.input("[cyan]> [/cyan]").strip()
+        return console.input("[accent]> [/accent]").strip()
     except EOFError:
         return ""
+
+
+def _configure_settings(settings: Settings) -> Settings:
+    edited = settings.model_copy(deep=True)
+    console.print(
+        Panel(
+            "Edit the existing council members. Press Enter to keep a value.",
+            title="Configure Council",
+            border_style="border",
+        )
+    )
+
+    for index, member in enumerate(edited.council, start=1):
+        console.print(
+            Panel(
+                _member_summary(member),
+                title=f"Member {index}",
+                border_style="border",
+            )
+        )
+        member.name = _read_required_value("Name", member.name)
+        member.model = _read_required_value("Model", member.model)
+        member.role = _read_required_value("Instruction", member.role)
+        member.temperature = _read_temperature(member.temperature)
+
+    console.print()
+    console.print(_members_table(edited))
+    if not _confirm(f"Save changes to {DEFAULT_CONFIG_PATH.name}?"):
+        console.print("[muted]Configuration unchanged.[/muted]")
+        return settings
+
+    save_config(edited)
+    console.print(f"[success]Saved {DEFAULT_CONFIG_PATH.name}.[/success]")
+    return edited
+
+
+def _member_summary(member: CouncilMember) -> str:
+    return (
+        f"[accent]Name:[/accent] {escape(member.name)}\n"
+        f"[accent]Model:[/accent] {escape(member.model)}\n"
+        f"[accent]Temperature:[/accent] {member.temperature:g}\n"
+        f"[accent]Instruction:[/accent] {escape(member.role)}"
+    )
+
+
+def _read_required_value(label: str, current: str) -> str:
+    while True:
+        try:
+            value = console.input(
+                f"[accent]{label}[/accent] (current: {escape(current)}): "
+            ).strip()
+        except EOFError:
+            return current
+
+        value = value or current
+        if value:
+            return value
+        console.print(f"[warning]{label} cannot be empty.[/warning]")
+
+
+def _read_temperature(current: float) -> float:
+    while True:
+        try:
+            value = console.input(
+                f"[accent]Temperature[/accent] (current: {current:g}): "
+            ).strip()
+        except EOFError:
+            return current
+
+        if not value:
+            return current
+        try:
+            return float(value)
+        except ValueError:
+            console.print("[warning]Temperature must be a number.[/warning]")
+
+
+def _confirm(prompt: str) -> bool:
+    try:
+        answer = console.input(f"{escape(prompt)} \\[y/N] ")
+    except EOFError:
+        return False
+    return answer.strip().lower() in {"y", "yes"}
 
 
 async def _preflight_ollama(settings: Settings) -> list[str]:
@@ -126,6 +266,29 @@ async def _preflight_ollama(settings: Settings) -> list[str]:
     ]
 
 
+async def _run_council_with_status(prompt: str, settings: Settings) -> CouncilRun:
+    task = asyncio.create_task(run_fast_council(prompt, config=settings))
+    message_index = 0
+
+    with console.status(
+        f"[accent]{COUNCIL_STATUS_MESSAGES[message_index]}[/accent]",
+        spinner="dots",
+    ) as status:
+        while not task.done():
+            try:
+                return await asyncio.wait_for(
+                    asyncio.shield(task),
+                    timeout=COUNCIL_STATUS_INTERVAL_SECONDS,
+                )
+            except TimeoutError:
+                message_index = (message_index + 1) % len(COUNCIL_STATUS_MESSAGES)
+                status.update(
+                    f"[accent]{COUNCIL_STATUS_MESSAGES[message_index]}[/accent]"
+                )
+
+        return await task
+
+
 def _render_run(run: CouncilRun) -> None:
     console.print()
     _render_errors(run.errors)
@@ -147,7 +310,9 @@ def _has_details(run: CouncilRun) -> bool:
 def _wants_details() -> bool:
     console.print()
     try:
-        answer = console.input("Show voting details and candidate answers? [y/N] ")
+        answer = console.input(
+            "Show voting details and candidate answers? \\[y/N] "
+        )
     except EOFError:
         return False
     return answer.strip().lower() in {"y", "yes"}
@@ -155,7 +320,7 @@ def _wants_details() -> bool:
 
 def _render_errors(errors: Iterable[str]) -> None:
     for error in errors:
-        console.print(Panel(error, title="Warning", border_style="yellow"))
+        console.print(Panel(error, title="Warning", border_style="warning"))
 
 
 def _render_final_answer(run: CouncilRun) -> None:
@@ -164,7 +329,7 @@ def _render_final_answer(run: CouncilRun) -> None:
             Panel(
                 _answer_text(run.final_answer),
                 title=f"Final Answer - Winner {run.winner_label}",
-                border_style="green",
+                border_style="success",
             )
         )
         return
@@ -177,15 +342,15 @@ def _render_final_answer(run: CouncilRun) -> None:
     else:
         message = "No candidate answers are available."
 
-    console.print(Panel(message, title="No Single Winner", border_style="yellow"))
+    console.print(Panel(message, title="No Single Winner", border_style="warning"))
 
 
 def _render_vote_summary(run: CouncilRun) -> None:
     if not run.vote_counts:
         return
 
-    table = Table(title="Vote Summary")
-    table.add_column("Label", style="bold cyan")
+    table = Table(title="Vote Summary", header_style="accent", border_style="border")
+    table.add_column("Label", style="accent")
     table.add_column("Votes", justify="right")
 
     for label, count in run.vote_counts.items():
@@ -198,9 +363,14 @@ def _render_votes(votes: list[Vote]) -> None:
     if not votes:
         return
 
-    table = Table(title="Votes", show_lines=True)
-    table.add_column("Member", style="bold cyan")
-    table.add_column("Model", style="green")
+    table = Table(
+        title="Votes",
+        show_lines=True,
+        header_style="accent",
+        border_style="border",
+    )
+    table.add_column("Member", style="accent")
+    table.add_column("Model", style="muted")
     table.add_column("Vote", justify="center")
     table.add_column("Valid", justify="center")
     table.add_column("Reason")
@@ -224,7 +394,7 @@ def _render_votes(votes: list[Vote]) -> None:
             Panel(
                 vote.raw_response,
                 title=f"Invalid Raw Vote - {vote.member_name} / {vote.model}",
-                border_style="red",
+                border_style="danger",
             )
         )
 
@@ -241,7 +411,7 @@ def _render_candidates(candidates: list[CandidateAnswer]) -> None:
                     f"Candidate {candidate.label} - "
                     f"{candidate.member_name} / {candidate.model}"
                 ),
-                border_style="blue",
+                border_style="border",
             )
         )
 
