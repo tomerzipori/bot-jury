@@ -17,11 +17,11 @@ from council.voting import top_tied_labels
 
 APP_THEME = Theme(
     {
-        "brand": "grey70 bold",
-        "accent": "yellow3",
+        "brand": "#ff9aa2 bold",
+        "accent": "#ff9aa2",
         "muted": "grey50",
         "success": "green3",
-        "warning": "yellow3",
+        "warning": "#ff9aa2",
         "danger": "red3",
         "border": "grey50",
     }
@@ -101,13 +101,13 @@ def _run_council(settings: Settings) -> None:
 def _render_header(settings: Settings) -> None:
     console.print(
         Panel.fit(
-            "[brand]LLM Council[/brand]\n[muted]Fast Council via local Ollama[/muted]",
+            "[brand]Bot Jury[/brand]\n"
+            "[muted]Make them decide for you.[/muted]",
             border_style="border",
+            padding=(1, 2),
         )
     )
-    console.print(f"[accent]Ollama:[/accent] {settings.ollama.base_url}")
     console.print(f"[accent]Run log:[/accent] {settings.app.runs_path}")
-    console.print(_members_table(settings))
 
 
 def _members_table(settings: Settings) -> Table:
@@ -135,11 +135,7 @@ def _members_table(settings: Settings) -> Table:
 
 def _read_start_action() -> str:
     console.print()
-    console.print(
-        "[muted][Enter] run council   "
-        "[accent]c[/accent] configure council   "
-        "[accent]q[/accent] quit[/muted]"
-    )
+    console.print(_actions_menu())
 
     while True:
         try:
@@ -150,6 +146,16 @@ def _read_start_action() -> str:
         if action in {"", "c", "q"}:
             return action
         console.print("[warning]Choose Enter, c, or q.[/warning]")
+
+
+def _actions_menu() -> Panel:
+    grid = Table.grid(padding=(0, 2))
+    grid.add_column(style="accent")
+    grid.add_column(style="muted")
+    grid.add_row("Enter", "Run council")
+    grid.add_row("c", "Configure")
+    grid.add_row("q", "Quit")
+    return Panel.fit(grid, title="Actions", border_style="border", padding=(0, 1))
 
 
 def _read_prompt() -> str:

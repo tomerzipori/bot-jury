@@ -1,64 +1,106 @@
-# LLM Council
+# Bot Jury
 
-LLM Council is a local interactive CLI that runs a Fast Council workflow with Ollama models.
+Bot Jury is a local CLI that asks several Ollama-powered bots to answer the same prompt, makes them vote on the best answer, and shows you the winning response.
 
-## Install
+It is built for quick local decision-making: write a prompt, let the bots judge the options, then run another prompt without restarting the terminal.
+
+## What It Does
+
+- Sends your prompt to five configured council members.
+- Collects independent candidate answers.
+- Anonymizes the answers before voting.
+- Asks the successful bots to vote for the best answer.
+- Prints the winning final answer first.
+- Optionally shows the vote summary, each vote, and candidate answers.
+- Saves every run to `runs.jsonl`.
+
+Bot Jury runs locally through Ollama. It does not call hosted AI APIs.
+
+## Requirements
+
+- Python 3.10+
+- [Ollama](https://ollama.com)
+- The configured local model, currently `nemotron-3-nano:4b`
+
+## Quick Start
+
+Install Ollama first, then run:
 
 ```bash
 ./install.sh
 ```
 
-The installer creates the Python environment, installs dependencies, pulls the configured Ollama model, and creates a local `llm-council` launcher.
+The installer creates a `.venv`, installs Python dependencies, pulls the default Ollama model, and creates a local launcher named `llm-council`.
 
-## Install And Run Ollama
-
-Install Ollama from https://ollama.com before running `./install.sh`.
-
-The installer pulls the configured model:
-
-```bash
-ollama pull nemotron-3-nano:4b
-```
-
-Make sure Ollama is running locally. The app calls:
-
-```text
-http://localhost:11434/api/chat
-```
-
-## Run App
+Start the app:
 
 ```bash
 ./llm-council
 ```
 
+## Usage
+
 At startup, choose an action:
 
 ```text
-[Enter] run council   c configure council   q quit
+Enter  Run council
+c      Configure
+q      Quit
 ```
 
-Press Enter to run the council. Enter your prompt when asked and press Enter to submit.
+Press Enter to run the jury, type your prompt, and press Enter again.
 
-By default, the app prints only the final answer. After the answer, you can choose whether to show voting details and candidate answers.
-When a run finishes, the app returns to the action menu so you can enter another prompt, configure the council, or choose `q` to quit.
+After the final answer is printed, you can choose whether to show voting details and candidate answers. When a run finishes, Bot Jury returns to the action menu so you can run another prompt, configure the council, or quit.
 
-Choose `c` to edit the existing five council members. The editor lets you change each member's name, model, instruction, and temperature, then saves the changes to `config.yaml`. It does not add or remove council members yet.
+## Configuration
 
-## Development Setup
+The default council is defined in `config.yaml`.
+
+Each member has:
+
+- `name`: display name in vote details.
+- `model`: local Ollama model name.
+- `role`: instruction that shapes how the member answers and votes.
+- `temperature`: model temperature for answer and vote calls.
+
+Use `c` in the CLI to edit the existing members. The editor changes member names, models, roles, and temperatures, then saves back to `config.yaml`.
+
+## Ollama
+
+Make sure Ollama is running before starting Bot Jury. By default, the app calls:
+
+```text
+http://localhost:11434/api/chat
+```
+
+If the configured model is missing, install it with:
 
 ```bash
-python -m venv .venv
+ollama pull nemotron-3-nano:4b
+```
+
+You can use a different local model by editing `config.yaml` or using the built-in configuration flow.
+
+## Development
+
+Set up the environment manually:
+
+```bash
+python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 python app.py
+```
+
+Run checks:
+
+```bash
+.venv/bin/python -m pytest
+.venv/bin/python -m ruff check .
 ```
 
 ## Notes
 
-- All model calls are local through Ollama.
-- This version implements Fast Council only.
-- The five council members are configured in `config.yaml`.
-- All default council members use `nemotron-3-nano:4b`.
-- Each run is appended to `runs.jsonl`.
-- If a configured model is unavailable, the app records the failure and continues with the successful models.
+- This version implements a single Fast Council workflow.
+- At least two successful candidate answers are required for voting.
+- Runs are appended as JSON lines to the path configured by `app.runs_path`.
