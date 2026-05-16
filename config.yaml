@@ -1,6 +1,6 @@
 ollama:
   base_url: "http://localhost:11434"
-  request_timeout_seconds: 120
+  request_timeout_seconds: 45
 
 app:
   runs_path: "runs.jsonl"

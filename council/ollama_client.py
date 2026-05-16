@@ -52,6 +52,42 @@ class OllamaClient:
 
         return content
 
+    async def list_models(self) -> set[str]:
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                response = await client.get(f"{self.base_url}/api/tags")
+                response.raise_for_status()
+                data = response.json()
+        except httpx.ConnectError as exc:
+            raise OllamaError(
+                f"Could not connect to Ollama at {self.base_url}. "
+                "Make sure Ollama is running."
+            ) from exc
+        except httpx.HTTPStatusError as exc:
+            detail = _response_detail(exc.response)
+            raise OllamaError(
+                f"Ollama model check failed: {exc.response.status_code} {detail}"
+            ) from exc
+        except httpx.RequestError as exc:
+            raise OllamaError(f"Ollama model check failed: {exc}") from exc
+        except ValueError as exc:
+            raise OllamaError("Ollama returned invalid JSON while listing models") from exc
+
+        models = data.get("models", [])
+        names: set[str] = set()
+        if not isinstance(models, list):
+            return names
+
+        for model in models:
+            if not isinstance(model, dict):
+                continue
+            for key in ("name", "model"):
+                name = model.get(key)
+                if isinstance(name, str):
+                    names.add(name)
+
+        return names
+
 
 def _response_detail(response: httpx.Response) -> str:
     try:

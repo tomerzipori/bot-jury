@@ -8,14 +8,33 @@ from rich.text import Text
 
 from council.config import load_config
 from council.models import CandidateAnswer, CouncilRun, Settings, Vote
+from council.ollama_client import OllamaClient
 from council.orchestrator import run_fast_council
 from council.voting import top_tied_labels
 
 
 console = Console()
+PREFLIGHT_TIMEOUT_SECONDS = 5
 
 
 def main() -> None:
+    try:
+        _main()
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Cancelled.[/yellow]")
+        raise SystemExit(130) from None
+    except Exception as exc:
+        console.print(
+            Panel(
+                str(exc),
+                title="Unexpected Error",
+                border_style="red",
+            )
+        )
+        raise SystemExit(1) from exc
+
+
+def _main() -> None:
     try:
         settings = load_config()
     except Exception as exc:
@@ -32,6 +51,12 @@ def main() -> None:
     prompt = _read_prompt()
     if not prompt:
         console.print("[yellow]No prompt entered. Exiting.[/yellow]")
+        raise SystemExit(1)
+
+    with console.status("[bold]Checking Ollama...[/bold]", spinner="dots"):
+        preflight_errors = asyncio.run(_preflight_ollama(settings))
+    if preflight_errors:
+        _render_errors(preflight_errors)
         raise SystemExit(1)
 
     with console.status("[bold]Running Fast Council...[/bold]", spinner="dots"):
@@ -73,29 +98,59 @@ def _members_table(settings: Settings) -> Table:
 def _read_prompt() -> str:
     console.print()
     console.print("[bold]Enter your prompt.[/bold]")
-    console.print("[dim]Finish with an empty line.[/dim]")
+    try:
+        return console.input("[cyan]> [/cyan]").strip()
+    except EOFError:
+        return ""
 
-    lines: list[str] = []
-    while True:
-        try:
-            line = console.input("[cyan]> [/cyan]")
-        except EOFError:
-            break
 
-        if line == "":
-            break
-        lines.append(line)
+async def _preflight_ollama(settings: Settings) -> list[str]:
+    client = OllamaClient(
+        settings.ollama.base_url,
+        timeout_seconds=PREFLIGHT_TIMEOUT_SECONDS,
+    )
+    try:
+        installed_models = await client.list_models()
+    except Exception as exc:
+        return [str(exc)]
 
-    return "\n".join(lines).strip()
+    required_models = {member.model for member in settings.council}
+    missing_models = sorted(required_models - installed_models)
+    if not missing_models:
+        return []
+
+    pulls = "\n".join(f"ollama pull {model}" for model in missing_models)
+    return [
+        "Missing required Ollama model(s): "
+        f"{', '.join(missing_models)}\n\nInstall them with:\n{pulls}"
+    ]
 
 
 def _render_run(run: CouncilRun) -> None:
     console.print()
     _render_errors(run.errors)
     _render_final_answer(run)
+    if _has_details(run) and _wants_details():
+        _render_details(run)
+
+
+def _render_details(run: CouncilRun) -> None:
     _render_vote_summary(run)
     _render_votes(run.votes)
     _render_candidates(run.candidates)
+
+
+def _has_details(run: CouncilRun) -> bool:
+    return bool(run.vote_counts or run.votes or run.candidates)
+
+
+def _wants_details() -> bool:
+    console.print()
+    try:
+        answer = console.input("Show voting details and candidate answers? [y/N] ")
+    except EOFError:
+        return False
+    return answer.strip().lower() in {"y", "yes"}
 
 
 def _render_errors(errors: Iterable[str]) -> None:

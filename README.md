@@ -2,24 +2,19 @@
 
 LLM Council is a local interactive CLI that runs a Fast Council workflow with Ollama models.
 
-## Setup
+## Install
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+./install.sh
 ```
 
-On Windows:
-
-```bash
-.venv\Scripts\activate
-pip install -r requirements.txt
-```
+The installer creates the Python environment, installs dependencies, pulls the configured Ollama model, and creates a local `llm-council` launcher.
 
 ## Install And Run Ollama
 
-Install Ollama from https://ollama.com, then pull the configured model:
+Install Ollama from https://ollama.com before running `./install.sh`.
+
+The installer pulls the configured model:
 
 ```bash
 ollama pull nemotron-3-nano:4b
@@ -34,10 +29,21 @@ http://localhost:11434/api/chat
 ## Run App
 
 ```bash
-python app.py
+./llm-council
 ```
 
-Enter your prompt when asked. Finish the prompt with an empty line.
+Enter your prompt when asked and press Enter to submit.
+
+By default, the app prints only the final answer. After the answer, you can choose whether to show voting details and candidate answers.
+
+## Development Setup
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python app.py
+```
 
 ## Notes
 

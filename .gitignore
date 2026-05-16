@@ -1,5 +1,6 @@
 .DS_Store
 runs.jsonl
+llm-council
 
 __pycache__/
 *.py[cod]
