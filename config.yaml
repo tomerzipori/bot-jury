@@ -1,0 +1,32 @@
+ollama:
+  base_url: "http://localhost:11434"
+  request_timeout_seconds: 120
+
+app:
+  runs_path: "runs.jsonl"
+
+council:
+  - name: Analyst
+    model: "nemotron-3-nano:4b"
+    role: "Give a clear, accurate, structured answer."
+    temperature: 0.3
+
+  - name: Skeptic
+    model: "nemotron-3-nano:4b"
+    role: "Identify risks, weak assumptions, and likely mistakes."
+    temperature: 0.3
+
+  - name: Builder
+    model: "nemotron-3-nano:4b"
+    role: "Prefer practical, implementable answers."
+    temperature: 0.2
+
+  - name: Editor
+    model: "nemotron-3-nano:4b"
+    role: "Prefer concise, well-organized answers."
+    temperature: 0.2
+
+  - name: Synthesizer
+    model: "nemotron-3-nano:4b"
+    role: "Prefer balanced, complete answers that integrate the strongest ideas."
+    temperature: 0.2
