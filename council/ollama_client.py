@@ -41,6 +41,11 @@ class OllamaClient:
                 f"Ollama request failed for model {model}: "
                 f"{exc.response.status_code} {detail}"
             ) from exc
+        except httpx.TimeoutException as exc:
+            raise OllamaError(
+                f"Ollama request timed out for model {model} after "
+                f"{self.timeout_seconds} seconds"
+            ) from exc
         except httpx.RequestError as exc:
             raise OllamaError(f"Ollama request failed for model {model}: {exc}") from exc
         except ValueError as exc:
@@ -67,6 +72,10 @@ class OllamaClient:
             detail = _response_detail(exc.response)
             raise OllamaError(
                 f"Ollama model check failed: {exc.response.status_code} {detail}"
+            ) from exc
+        except httpx.TimeoutException as exc:
+            raise OllamaError(
+                f"Ollama model check timed out after {self.timeout_seconds} seconds"
             ) from exc
         except httpx.RequestError as exc:
             raise OllamaError(f"Ollama model check failed: {exc}") from exc
