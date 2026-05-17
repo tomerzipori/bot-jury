@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bot-jury"
+version = "0.1.0"
+description = "Local Ollama-powered council CLI for comparing and selecting answers."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "httpx>=0.27",
+    "ollama>=0.6,<1.0",
+    "pydantic>=2.9",
+    "pyyaml>=6.0",
+    "rich>=13.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.5",
+]
+
+[project.scripts]
+bot-jury = "council.cli:app"
+
+[tool.setuptools]
+py-modules = ["app"]
+packages = ["council"]
+
+[tool.setuptools.package-data]
+council = ["default_config.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"

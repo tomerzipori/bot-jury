@@ -1,20 +1,22 @@
 # Bot Jury
 
-Bot Jury is a local CLI that asks several Ollama-powered bots to answer the same prompt, makes them vote on the best answer, and shows you the winning response.
+Bot Jury is a local CLI that asks several Ollama-powered bots to answer the
+same prompt, scores the candidate answers with a reviewer rubric, and shows the
+winning response.
 
-It is built for quick local decision-making: write a prompt, let the bots judge the options, then run another prompt without restarting the terminal.
+It runs locally through Ollama. It does not call hosted AI APIs.
 
 ## What It Does
 
-- Sends your prompt to five configured council members.
+- Sends your prompt to configured council members.
 - Collects independent candidate answers.
-- Anonymizes the answers before voting.
-- Asks the successful bots to vote for the best answer.
+- Anonymizes answers before review.
+- Scores each eligible answer for correctness, completeness, clarity,
+  usefulness, and safety.
+- Falls back to the older vote-counting flow if structured scoring fails.
 - Prints the winning final answer first.
-- Optionally shows the vote summary, each vote, and candidate answers.
-- Saves every run to `runs.jsonl`.
-
-Bot Jury runs locally through Ollama. It does not call hosted AI APIs.
+- Optionally shows score details, fallback votes, and candidate answers.
+- Saves every run to the configured `runs.jsonl` path.
 
 ## Requirements
 
@@ -22,75 +24,87 @@ Bot Jury runs locally through Ollama. It does not call hosted AI APIs.
 - [Ollama](https://ollama.com)
 - The configured local model, currently `nemotron-3-nano:4b`
 
-## Quick Start
+## Install
 
-Install Ollama first, then run:
-
-```bash
-./install.sh
-```
-
-The installer creates a `.venv`, installs Python dependencies, pulls the default Ollama model, and creates a local launcher named `llm-council`.
-
-Start the app:
-
-```bash
-./llm-council
-```
-
-## Usage
-
-At startup, choose an action:
-
-```text
-Enter  Run council
-c      Configure
-q      Quit
-```
-
-Press Enter to run the jury, type your prompt, and press Enter again.
-
-After the final answer is printed, you can choose whether to show voting details and candidate answers. When a run finishes, Bot Jury returns to the action menu so you can run another prompt, configure the council, or quit.
-
-## Configuration
-
-The default council is defined in `config.yaml`.
-
-Each member has:
-
-- `name`: display name in vote details.
-- `model`: local Ollama model name.
-- `role`: instruction that shapes how the member answers and votes.
-- `temperature`: model temperature for answer and vote calls.
-
-Use `c` in the CLI to edit the existing members. The editor changes member names, models, roles, and temperatures, then saves back to `config.yaml`.
-
-## Ollama
-
-Make sure Ollama is running before starting Bot Jury. By default, the app calls:
-
-```text
-http://localhost:11434/api/chat
-```
-
-If the configured model is missing, install it with:
-
-```bash
-ollama pull nemotron-3-nano:4b
-```
-
-You can use a different local model by editing `config.yaml` or using the built-in configuration flow.
-
-## Development
-
-Set up the environment manually:
+Install Ollama first, then set up the Python package:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -r requirements.txt
-python app.py
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev]"
+ollama pull nemotron-3-nano:4b
 ```
+
+Start the interactive app:
+
+```bash
+bot-jury
+```
+
+## Usage
+
+Interactive mode:
+
+```bash
+bot-jury
+```
+
+Scriptable one-shot mode:
+
+```bash
+bot-jury ask "Compare these two implementation options..."
+bot-jury ask --details "What are the risks in this migration?"
+bot-jury ask --json "Give me a concise release checklist."
+```
+
+Other commands:
+
+```bash
+bot-jury --help
+bot-jury models list
+bot-jury config path
+bot-jury config show
+```
+
+Candidate streaming is available only when `ollama.max_parallel_requests` is
+`1`, which keeps terminal output readable:
+
+```bash
+bot-jury --stream
+bot-jury ask --stream "Draft a rollback plan."
+```
+
+## Configuration
+
+The repo `config.yaml` is the default template. At runtime, Bot Jury copies it
+to a user config path on first run:
+
+- macOS: `~/Library/Application Support/bot-jury/config.yaml`
+- Linux: `~/.config/bot-jury/config.yaml`
+- Windows: `%APPDATA%\bot-jury\config.yaml`
+
+Override the config path with an environment variable:
+
+```bash
+BOT_JURY_CONFIG=/path/to/config.yaml bot-jury ask "..."
+```
+
+Or pass an explicit path:
+
+```bash
+bot-jury --config /path/to/config.yaml config show
+```
+
+Key config fields:
+
+- `ollama.base_url`: Ollama host URL.
+- `ollama.request_timeout_seconds`: request timeout.
+- `ollama.max_parallel_requests`: shared concurrency limit for model calls.
+- `app.runs_path`: JSONL run history path.
+- `council`: reviewer names, models, roles, and answer temperatures.
+
+## Development
 
 Run checks:
 
@@ -99,8 +113,14 @@ Run checks:
 .venv/bin/python -m ruff check .
 ```
 
+Install or refresh the editable environment:
+
+```bash
+.venv/bin/python -m pip install -e ".[dev]"
+```
+
 ## Notes
 
-- This version implements a single Fast Council workflow.
-- At least two successful candidate answers are required for voting.
+- At least two successful candidate answers are required for review.
+- Reviewers do not score or vote for their own candidate answer.
 - Runs are appended as JSON lines to the path configured by `app.runs_path`.

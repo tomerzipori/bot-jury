@@ -27,10 +27,14 @@ def test_main_returns_to_action_menu_after_run(monkeypatch) -> None:
     runs = []
 
     _quiet_console(monkeypatch)
-    monkeypatch.setattr(app, "load_config", lambda: settings)
+    monkeypatch.setattr(app, "load_config", lambda path=None: settings)
     monkeypatch.setattr(app, "_render_header", lambda current: headers.append(current))
     monkeypatch.setattr(app, "_read_start_action", lambda: next(actions))
-    monkeypatch.setattr(app, "_run_council", lambda current: runs.append(current))
+    monkeypatch.setattr(
+        app,
+        "_run_council",
+        lambda current, stream=None: runs.append(current),
+    )
 
     app._main()
 
@@ -44,10 +48,14 @@ def test_main_can_run_twice_in_one_session(monkeypatch) -> None:
     runs = []
 
     _quiet_console(monkeypatch)
-    monkeypatch.setattr(app, "load_config", lambda: settings)
+    monkeypatch.setattr(app, "load_config", lambda path=None: settings)
     monkeypatch.setattr(app, "_render_header", lambda current: None)
     monkeypatch.setattr(app, "_read_start_action", lambda: next(actions))
-    monkeypatch.setattr(app, "_run_council", lambda current: runs.append(current))
+    monkeypatch.setattr(
+        app,
+        "_run_council",
+        lambda current, stream=None: runs.append(current),
+    )
 
     app._main()
 
@@ -63,15 +71,19 @@ def test_main_configure_returns_to_action_menu(monkeypatch) -> None:
     runs = []
 
     _quiet_console(monkeypatch)
-    monkeypatch.setattr(app, "load_config", lambda: original)
+    monkeypatch.setattr(app, "load_config", lambda path=None: original)
     monkeypatch.setattr(app, "_render_header", lambda current: headers.append(current))
     monkeypatch.setattr(app, "_read_start_action", lambda: next(actions))
     monkeypatch.setattr(
         app,
         "_configure_settings",
-        lambda current: configured.append(current) or edited,
+        lambda current, config_path=None: configured.append(current) or edited,
     )
-    monkeypatch.setattr(app, "_run_council", lambda current: runs.append(current))
+    monkeypatch.setattr(
+        app,
+        "_run_council",
+        lambda current, stream=None: runs.append(current),
+    )
 
     app._main()
 
@@ -85,10 +97,14 @@ def test_main_quit_exits_without_running(monkeypatch) -> None:
     runs = []
 
     _quiet_console(monkeypatch)
-    monkeypatch.setattr(app, "load_config", lambda: settings)
+    monkeypatch.setattr(app, "load_config", lambda path=None: settings)
     monkeypatch.setattr(app, "_render_header", lambda current: None)
     monkeypatch.setattr(app, "_read_start_action", lambda: "q")
-    monkeypatch.setattr(app, "_run_council", lambda current: runs.append(current))
+    monkeypatch.setattr(
+        app,
+        "_run_council",
+        lambda current, stream=None: runs.append(current),
+    )
 
     app._main()
 

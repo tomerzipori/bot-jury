@@ -8,8 +8,15 @@ from rich.table import Table
 from rich.text import Text
 from rich.theme import Theme
 
-from council.config import DEFAULT_CONFIG_PATH, load_config, save_config
-from council.models import CandidateAnswer, CouncilMember, CouncilRun, Settings, Vote
+from council.config import load_config, resolve_config_path, save_config
+from council.models import (
+    CandidateAnswer,
+    CouncilMember,
+    CouncilRun,
+    ScoreReview,
+    Settings,
+    Vote,
+)
 from council.ollama_client import OllamaClient
 from council.orchestrator import run_fast_council
 from council.voting import top_tied_labels
@@ -33,15 +40,19 @@ COUNCIL_STATUS_MESSAGES = [
     "Waking up the council...",
     "Passing notes between tiny geniuses...",
     "Collecting suspiciously confident answers...",
-    "Making everyone vote before they change their mind...",
-    "Counting hands in the council chamber...",
+    "Scoring candidate answers...",
+    "Checking the review rubric...",
     "Polishing the least-wrong answer...",
 ]
 
 
-def main() -> None:
+def main(
+    config_path: str | None = None,
+    *,
+    stream: bool | None = None,
+) -> None:
     try:
-        _main()
+        _main(config_path=config_path, stream=stream)
     except KeyboardInterrupt:
         console.print("\n[warning]Cancelled.[/warning]")
         raise SystemExit(130) from None
@@ -56,13 +67,18 @@ def main() -> None:
         raise SystemExit(1) from exc
 
 
-def _main() -> None:
+def _main(
+    config_path: str | None = None,
+    *,
+    stream: bool | None = None,
+) -> None:
+    resolved_config_path = resolve_config_path(config_path)
     try:
-        settings = load_config()
+        settings = load_config(resolved_config_path)
     except Exception as exc:
         console.print(
             Panel(
-                f"Could not load config.yaml:\n{exc}",
+                f"Could not load {resolved_config_path}:\n{exc}",
                 title="Configuration Error",
                 border_style="danger",
             )
@@ -76,12 +92,16 @@ def _main() -> None:
             console.print("[muted]Goodbye.[/muted]")
             return
         if action == "c":
-            settings = _configure_settings(settings)
+            settings = _configure_settings(settings, resolved_config_path)
             continue
-        _run_council(settings)
+        _run_council(settings, stream=stream)
 
 
-def _run_council(settings: Settings) -> None:
+def _run_council(
+    settings: Settings,
+    *,
+    stream: bool | None = None,
+) -> None:
     prompt = _read_prompt()
     if not prompt:
         console.print("[warning]No prompt entered. Exiting.[/warning]")
@@ -93,7 +113,7 @@ def _run_council(settings: Settings) -> None:
         _render_errors(preflight_errors)
         raise SystemExit(1)
 
-    run = asyncio.run(_run_council_with_status(prompt, settings))
+    run = asyncio.run(_run_council_with_status(prompt, settings, stream=stream))
 
     _render_run(run)
 
@@ -167,7 +187,7 @@ def _read_prompt() -> str:
         return ""
 
 
-def _configure_settings(settings: Settings) -> Settings:
+def _configure_settings(settings: Settings, config_path: str | None = None) -> Settings:
     edited = settings.model_copy(deep=True)
     console.print(
         Panel(
@@ -192,12 +212,13 @@ def _configure_settings(settings: Settings) -> Settings:
 
     console.print()
     console.print(_members_table(edited))
-    if not _confirm(f"Save changes to {DEFAULT_CONFIG_PATH.name}?"):
+    target_path = resolve_config_path(config_path)
+    if not _confirm(f"Save changes to {target_path}?"):
         console.print("[muted]Configuration unchanged.[/muted]")
         return settings
 
-    save_config(edited)
-    console.print(f"[success]Saved {DEFAULT_CONFIG_PATH.name}.[/success]")
+    save_config(edited, target_path)
+    console.print(f"[success]Saved {target_path}.[/success]")
     return edited
 
 
@@ -272,7 +293,26 @@ async def _preflight_ollama(settings: Settings) -> list[str]:
     ]
 
 
-async def _run_council_with_status(prompt: str, settings: Settings) -> CouncilRun:
+async def _run_council_with_status(
+    prompt: str,
+    settings: Settings,
+    *,
+    stream: bool | None = None,
+) -> CouncilRun:
+    should_stream = stream if stream is not None else settings.ollama.max_parallel_requests == 1
+    should_stream = bool(should_stream and settings.ollama.max_parallel_requests == 1)
+    if should_stream:
+        _render_candidate_chunk._active = set()  # type: ignore[attr-defined]
+        console.print("[accent]Streaming candidate answers...[/accent]")
+        run = await run_fast_council(
+            prompt,
+            config=settings,
+            stream_candidates=True,
+            on_candidate_chunk=_render_candidate_chunk,
+        )
+        console.print()
+        return run
+
     task = asyncio.create_task(run_fast_council(prompt, config=settings))
     message_index = 0
 
@@ -295,6 +335,29 @@ async def _run_council_with_status(prompt: str, settings: Settings) -> CouncilRu
         return await task
 
 
+def _render_candidate_chunk(member: CouncilMember, chunk: str) -> None:
+    if not chunk:
+        return
+
+    key = (member.name, member.model)
+    if not hasattr(_render_candidate_chunk, "_active"):
+        _render_candidate_chunk._active = set()  # type: ignore[attr-defined]
+
+    active = _render_candidate_chunk._active  # type: ignore[attr-defined]
+    if key not in active:
+        console.print()
+        console.print(
+            Panel.fit(
+                f"{escape(member.name)} / {escape(member.model)}",
+                title="Candidate",
+                border_style="border",
+            )
+        )
+        active.add(key)
+
+    console.print(Text(chunk), end="")
+
+
 def _render_run(run: CouncilRun) -> None:
     console.print()
     _render_errors(run.errors)
@@ -304,20 +367,28 @@ def _render_run(run: CouncilRun) -> None:
 
 
 def _render_details(run: CouncilRun) -> None:
+    _render_score_summary(run)
+    _render_score_reviews(run.score_reviews)
     _render_vote_summary(run)
     _render_votes(run.votes)
     _render_candidates(run.candidates)
 
 
 def _has_details(run: CouncilRun) -> bool:
-    return bool(run.vote_counts or run.votes or run.candidates)
+    return bool(
+        run.score_totals
+        or run.score_reviews
+        or run.vote_counts
+        or run.votes
+        or run.candidates
+    )
 
 
 def _wants_details() -> bool:
     console.print()
     try:
         answer = console.input(
-            "Show voting details and candidate answers? \\[y/N] "
+            "Show scoring details and candidate answers? \\[y/N] "
         )
     except EOFError:
         return False
@@ -361,6 +432,61 @@ def _render_vote_summary(run: CouncilRun) -> None:
 
     for label, count in run.vote_counts.items():
         table.add_row(label, str(count))
+
+    console.print(table)
+
+
+def _render_score_summary(run: CouncilRun) -> None:
+    if not run.score_totals:
+        return
+
+    table = Table(title="Score Summary", header_style="accent", border_style="border")
+    table.add_column("Label", style="accent")
+    table.add_column("Weighted Score", justify="right")
+
+    for label, score in sorted(
+        run.score_totals.items(),
+        key=lambda item: (-item[1], item[0]),
+    ):
+        table.add_row(label, f"{score:.2f}")
+
+    console.print(table)
+
+
+def _render_score_reviews(reviews: list[ScoreReview]) -> None:
+    if not reviews:
+        return
+
+    table = Table(
+        title="Score Reviews",
+        show_lines=True,
+        header_style="accent",
+        border_style="border",
+    )
+    table.add_column("Member", style="accent")
+    table.add_column("Model", style="muted")
+    table.add_column("Best", justify="center")
+    table.add_column("Valid", justify="center")
+    table.add_column("Scores")
+    table.add_column("Error")
+
+    for review in reviews:
+        scores = "\n".join(
+            (
+                f"{score.label}: c{score.correctness} "
+                f"cmp{score.completeness} cl{score.clarity} "
+                f"u{score.usefulness} s{score.safety}"
+            )
+            for score in review.scores
+        )
+        table.add_row(
+            review.member_name,
+            review.model,
+            review.best_label or "-",
+            "yes" if review.valid else "no",
+            scores,
+            review.error or "",
+        )
 
     console.print(table)
 

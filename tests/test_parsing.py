@@ -48,3 +48,18 @@ def test_parse_vote_outside_valid_labels() -> None:
     assert reason == "Looks good."
     assert valid is False
     assert error == "Vote must be one of: A, B"
+
+
+def test_parse_vote_missing_reason_falls_back() -> None:
+    vote, reason, valid, error = parse_vote('{"vote": " b "}', {"A", "B"})
+
+    assert (vote, reason, valid, error) == ("B", "", True, None)
+
+
+def test_parse_vote_lowercase_and_whitespace_label() -> None:
+    vote, reason, valid, error = parse_vote(
+        '{"vote": " a ", "reason": "Best."}',
+        {"A", "B"},
+    )
+
+    assert (vote, reason, valid, error) == ("A", "Best.", True, None)
